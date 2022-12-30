@@ -5,6 +5,7 @@ import threading
 import multiprocessing
 
 import telebot
+import yandex_music
 from telebot import types
 from yandex_music import Client
 
@@ -162,6 +163,9 @@ def botactions():
             make_stat(message)
             return
         text = message.text
+        if re.match(r'^https://music\.yandex\.ru/users/.+?/playlists/[0-9]+$', text):
+            merge_playlists(message)
+            return
         text = try_get_url(text)
         if not re.match(r'^https://music.yandex.ru/album/[0-9]+/track/[0-9]+$', text):
             bot.send_message(message.from_user.id, "Немного не понял :(", reply_markup=get_keyboard())
@@ -193,6 +197,38 @@ def botactions():
         )
         question = f"Добавить\n{', '.join(user_params[message.from_user.id]['artists'])} - {user_params[message.from_user.id]['name']}?"
         bot.send_message(message.from_user.id, text=question, reply_markup=keyboard)
+
+    def merge_playlists(message):
+        bot.send_message(message.from_user.id, text="Начинаю слияние плейлистов")
+        owner_id = message.text.split('/')[-3]
+        playlist_id = message.text.split('/')[-1]
+        playlist = Client().users_playlists(playlist_id, owner_id)
+        kind = get_playlist_kind(client)
+        all_tracks = [(track['track']['id'], track['track']['albums'][0]['id']) for track in playlist['tracks']]
+        added_tracks = 0
+        percent = 25
+        for i, (track_id, album_id) in enumerate(all_tracks):
+            try:
+                if in_playlist(client, kind, track_id):
+                    continue
+                if track_in_db(cursor, track_id):
+                    continue
+                playlist_revision = get_playlist_revision(client)
+                client.users_playlists_insert_track(
+                    kind=kind, album_id=album_id, track_id=track_id, revision=playlist_revision
+                )
+                name, artists = get_artists_and_name(client, track_id)
+                add_track_db(cursor, message.from_user.username, track_id, name, artists)
+                added_tracks += 1
+                db_connection.commit()
+                if round(i / len(all_tracks) * 100) > percent:
+                    bot.send_message(message.from_user.id,
+                                     text=f"Слияние плейлистов завершено на {round(i / len(all_tracks) * 100, 1)}%")
+                    percent += 25
+            except Exception as e:
+                print('Bad')
+                db_connection.rollback()
+        bot.send_message(message.from_user.id, text=f"Слияние плейлистов завершено\nДобавлено {added_tracks} треков", reply_markup=get_keyboard())
 
 
     @bot.callback_query_handler(func=lambda call: True)
