@@ -16,13 +16,14 @@ import statistics
 
 
 BOT_INTERVAL = 3
-BOT_TIMEOUT = 30
+BOT_TIMEOUT = 60
 
 
 bot = None
 client = Client(YAM_TOKEN)
 client.init()
 cursor, db_connection = get_cursor()
+ctx = multiprocessing.get_context('spawn')
 
 
 def get_playlist_kind(client):
@@ -108,9 +109,13 @@ def get_keyboard():
 def botactions():
     #Set all your bot handlers inside this function
     #If bot is used as a global variable, remove bot as an input param
-
+    print('botactions')
     @bot.message_handler(content_types=['text'])
     def get_text_messages(message):
+        # print(message.from_user.username)
+        # print(message.from_user.id)
+        # print(message.from_user.first_name)
+        # print(message.from_user.last_name)
         if message.from_user.username not in USERNAME_WHITELIST:
             bot.send_message(message.from_user.id, "Прости, но твоего тега нет в списке\nЕсли считаешь, что это ошибка - напиши @nokrolikno", reply_markup=get_keyboard())
             return
@@ -120,7 +125,7 @@ def botactions():
         with open('logs.txt', 'a', encoding='UTF-8') as f:
             dt = datetime.datetime.now()
             formatted = dt.strftime('%d.%m.%Y - %H:%M:%S')
-            full_username = message.from_user.first_name + ' ' + message.from_user.last_name + f' ({message.from_user.username})'
+            full_username = message.from_user.first_name + ' ' + f' ({message.from_user.username})'
             f.write(f'\n{formatted} - {full_username}\n{message.text}\n')
         user_params[message.from_user.id] = {'username': message.from_user.username}
         if message.text == '/start':
@@ -148,10 +153,11 @@ def botactions():
                 bot.send_message(message.from_user.id, "Подожди немного -_-", reply_markup=get_keyboard())
                 return
             last_time_stat[0] = time.time()
-            p = multiprocessing.Process(target=create_box_plot)
+            p = ctx.Process(target=create_box_plot)
             p.start()
-            p.kill()
+            time.sleep(1)
             p.join()
+            p.kill()
             # create_box_plot(cursor)
             make_stat(message)
             return
@@ -244,6 +250,8 @@ def botactions():
     
     Ещё можешь написать /q и посмотреть все треки в плейлисте на текущий момент
     Напиши /stat и узнаешь статистику на текущий момент
+
+    По вопросам работы с ботом пиши @nokrolikno
     
     Ну и всё в принципе
             """, reply_markup=get_keyboard()
@@ -270,7 +278,7 @@ def botactions():
         else:
             filename = "statistics.png"
         bot.send_photo(message.from_user.id, photo=open(filename, 'rb'), caption="Вот кто сколько треков накидал")
-        bot.send_message(message.from_user.id, f"Самый популярный исполнитель на тусе — это\.\.\.  ||{most_popular_artist(cursor)}||", parse_mode='MarkdownV2', reply_markup=get_keyboard())
+        bot.send_message(message.from_user.id, f"Самый популярный исполнитель на тусе — это\.\.\.  ||{most_popular_artist(cursor).replace('!', '')}||", parse_mode='MarkdownV2', reply_markup=get_keyboard())
 
 
 def bot_polling():
@@ -279,7 +287,7 @@ def bot_polling():
     while True:
         try:
             print("New bot instance started")
-            bot = telebot.TeleBot(TELEGRAM_TOKEN) #Generate new bot instance
+            bot = telebot.TeleBot(TELEGRAM_TOKEN, threaded=False) #Generate new bot instance
             botactions() #If bot is used as a global variable, remove bot as an input param
             bot.polling(none_stop=True, interval=BOT_INTERVAL, timeout=BOT_TIMEOUT)
         except Exception as ex: #Error in polling
